@@ -43,11 +43,19 @@ def init_db():
             description TEXT DEFAULT '',
             position INTEGER NOT NULL,
             labels TEXT DEFAULT '[]',
+            comments TEXT DEFAULT '[]',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (column_id) REFERENCES columns(id) ON DELETE CASCADE
         );
     ''')
+
+    # Migration: Add comments column if it doesn't exist (for existing databases)
+    try:
+        cursor.execute("SELECT comments FROM cards LIMIT 1")
+    except sqlite3.OperationalError:
+        cursor.execute("ALTER TABLE cards ADD COLUMN comments TEXT DEFAULT '[]'")
+        conn.commit()
 
     # Seed default columns if table is empty
     count = cursor.execute("SELECT COUNT(*) FROM columns").fetchone()[0]
@@ -228,6 +236,50 @@ def reorder_cards(card_orders):
     conn.close()
 
 
+# ─── Comments ───────────────────────────────────────────────────────
+
+def add_comment(card_id, author, text):
+    """Add a comment to a card. Stores as JSON array of comment objects."""
+    conn = get_db()
+    card = conn.execute("SELECT comments FROM cards WHERE id = ?", (card_id,)).fetchone()
+    if not card:
+        conn.close()
+        return None
+
+    try:
+        comments = json.loads(card['comments']) if card['comments'] else []
+    except (json.JSONDecodeError, TypeError):
+        comments = []
+
+    new_comment = {
+        "author": author,
+        "text": text,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    comments.append(new_comment)
+
+    conn.execute(
+        "UPDATE cards SET comments = ?, updated_at = ? WHERE id = ?",
+        (json.dumps(comments), datetime.utcnow().isoformat(), card_id)
+    )
+    conn.commit()
+    conn.close()
+    return True
+
+
+def get_comments(card_id):
+    """Return the comments array for a card."""
+    conn = get_db()
+    card = conn.execute("SELECT comments FROM cards WHERE id = ?", (card_id,)).fetchone()
+    conn.close()
+    if not card:
+        return []
+    try:
+        return json.loads(card['comments']) if card['comments'] else []
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
 def get_board():
     """Get full board state: columns with their cards."""
     columns = get_all_columns()
@@ -238,6 +290,11 @@ def get_board():
         col_id = card['column_id']
         if col_id not in card_map:
             card_map[col_id] = []
+        # Parse comments JSON to array for API response
+        try:
+            card['comments'] = json.loads(card['comments']) if card['comments'] else []
+        except (json.JSONDecodeError, TypeError):
+            card['comments'] = []
         card_map[col_id].append(card)
 
     for col in columns:

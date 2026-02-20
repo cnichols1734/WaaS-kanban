@@ -96,6 +96,30 @@ def reorder_cards():
     return jsonify({'success': True})
 
 
+# ─── Comments ──────────────────────────────────────────────────────
+
+@app.route('/api/cards/<int:card_id>/comments', methods=['GET'])
+def get_card_comments(card_id):
+    """Return all comments for a card."""
+    comments = db.get_comments(card_id)
+    return jsonify(comments)
+
+
+@app.route('/api/cards/<int:card_id>/comments', methods=['POST'])
+def add_card_comment(card_id):
+    """Add a comment to a card."""
+    data = request.get_json()
+    author = data.get('author', 'Anonymous')
+    text = data.get('text', '')
+    if not text:
+        return jsonify({'error': 'Comment text required'}), 400
+
+    success = db.add_comment(card_id, author, text)
+    if not success:
+        return jsonify({'error': 'Card not found'}), 404
+    return jsonify({'success': True}), 201
+
+
 if __name__ == '__main__':
     db.init_db()
     app.run(host='0.0.0.0', port=5454, debug=True)
